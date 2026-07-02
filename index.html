@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>銘柄観測台 | Stock Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#0B0E14;
+    --surface:#131722;
+    --surface2:#1A1F2C;
+    --line:#262C3B;
+    --text:#E8E6E1;
+    --muted:#8A91A6;
+    --gold:#D4A24E;
+    --buy:#2EBD85;
+    --sell:#F0594A;
+    --hold:#4C8BF5;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:'Zen Kaku Gothic New',sans-serif;}
+  .mono{font-family:'JetBrains Mono',monospace;}
+  #app{max-width:560px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+
+  /* ---------- Auth ---------- */
+  #auth-screen{flex:1;display:flex;flex-direction:column;justify-content:center;padding:32px 24px;}
+  .brand{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+  .brand-mark{font-size:13px;letter-spacing:.3em;color:var(--gold);font-family:'JetBrains Mono',monospace;}
+  .brand-title{font-size:28px;font-weight:900;letter-spacing:.02em;}
+  .brand-sub{color:var(--muted);font-size:13px;margin-bottom:36px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;letter-spacing:.05em;}
+  .field input{width:100%;padding:13px 14px;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;color:var(--text);font-size:15px;font-family:'JetBrains Mono',monospace;}
+  .field input:focus{outline:none;border-color:var(--gold);}
+  .btn{width:100%;padding:14px;border-radius:10px;border:none;font-size:15px;font-weight:700;
+    cursor:pointer;letter-spacing:.03em;}
+  .btn-primary{background:var(--gold);color:#1A1304;margin-top:8px;}
+  .btn-primary:active{transform:scale(.98);}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--line);margin-top:10px;}
+  .auth-toggle{text-align:center;margin-top:18px;font-size:13px;color:var(--muted);}
+  .auth-toggle a{color:var(--gold);text-decoration:none;cursor:pointer;}
+  #auth-msg{font-size:13px;margin-top:12px;min-height:18px;}
+  #auth-msg.err{color:var(--sell);}
+  #auth-msg.ok{color:var(--buy);}
+
+  /* ---------- Layout ---------- */
+  #main-screen{display:none;flex:1;flex-direction:column;}
+  header.topbar{position:sticky;top:0;z-index:20;background:rgba(11,14,20,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;}
+  header.topbar .brand-title{font-size:17px;}
+  header.topbar .brand-mark{font-size:10px;}
+  #refresh-btn{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);
+    color:var(--gold);padding:9px 14px;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;}
+  #refresh-btn:active{transform:scale(.96);}
+  #refresh-btn.spin .ic{animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #last-updated{font-size:11px;color:var(--muted);text-align:right;padding:6px 18px 0;font-family:'JetBrains Mono',monospace;}
+
+  main{flex:1;overflow-y:auto;padding:14px 14px 90px;}
+  .section-title{font-size:13px;color:var(--muted);letter-spacing:.08em;margin:18px 4px 10px;
+    display:flex;align-items:center;gap:8px;}
+  .section-title .count{background:var(--surface2);color:var(--gold);border-radius:10px;padding:1px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;}
+
+  nav.tabs{position:sticky;bottom:0;z-index:20;display:flex;background:var(--surface);
+    border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom));}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--muted);padding:10px 4px;font-size:11px;
+    display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;border-radius:10px;}
+  nav.tabs button.active{color:var(--gold);background:var(--surface2);}
+  nav.tabs button .ic{font-size:18px;}
+
+  .view{display:none;}
+  .view.active{display:block;}
+
+  /* ---------- Cards ---------- */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px;}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;}
+  .stk-code{font-family:'JetBrains Mono',monospace;color:var(--gold);font-size:12px;letter-spacing:.05em;}
+  .stk-name{font-size:15px;font-weight:700;margin-top:2px;}
+  .stk-price{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;text-align:right;}
+  .stk-price .chg{display:block;font-size:11px;margin-top:2px;font-weight:500;}
+  .chg.up{color:var(--buy);} .chg.down{color:var(--sell);}
+  .metrics{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .metric{background:var(--surface2);border-radius:8px;padding:7px 10px;flex:1;min-width:84px;}
+  .metric .k{font-size:10px;color:var(--muted);letter-spacing:.04em;}
+  .metric .v{font-family:'JetBrains Mono',monospace;font-size:13px;margin-top:2px;font-weight:600;}
+  .signal{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;font-weight:700;
+    display:flex;align-items:center;gap:8px;}
+  .signal.buy{background:rgba(46,189,133,.12);color:var(--buy);}
+  .signal.watch{background:rgba(138,145,166,.12);color:var(--muted);}
+  .signal.stoploss{background:rgba(240,89,74,.14);color:var(--sell);}
+  .signal.takeprofit{background:rgba(76,139,245,.14);color:var(--hold);}
+  .signal.hold{background:rgba(46,189,133,.10);color:var(--buy);}
+  .card-actions{display:flex;gap:8px;margin-top:12px;}
+  .card-actions button{flex:1;padding:9px;border-radius:8px;border:1px solid var(--line);background:transparent;
+    color:var(--text);font-size:12px;cursor:pointer;}
+  .card-actions button.danger{color:var(--sell);border-color:rgba(240,89,74,.3);}
+  .card-actions button.promote{color:var(--gold);border-color:rgba(212,162,78,.35);}
+
+  .empty{text-align:center;padding:50px 20px;color:var(--muted);}
+  .empty .ic{font-size:34px;display:block;margin-bottom:10px;}
+  .empty .sub{font-size:12px;margin-top:6px;}
+
+  /* ---------- Add bar ---------- */
+  .add-row{display:flex;gap:8px;margin-bottom:6px;}
+  .add-row input{flex:1;padding:12px 14px;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;}
+  .add-row button{padding:0 18px;border-radius:10px;border:none;background:var(--gold);color:#1A1304;font-weight:700;cursor:pointer;}
+  .hint{font-size:11px;color:var(--muted);margin:0 4px 8px;}
+
+  /* ---------- Settings ---------- */
+  .preset-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .preset-card.active{border-color:var(--gold);}
+  .preset-head{display:flex;justify-content:space-between;align-items:center;}
+  .preset-head .name{font-weight:700;font-size:15px;}
+  .preset-head .badge{font-size:10px;background:var(--gold);color:#1A1304;padding:2px 8px;border-radius:8px;font-weight:700;}
+  .param-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;}
+  .param{display:flex;flex-direction:column;gap:4px;}
+  .param label{font-size:10px;color:var(--muted);}
+  .param input{padding:9px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px;
+    color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;}
+  .preset-actions{display:flex;gap:8px;margin-top:12px;}
+  .preset-actions button{flex:1;padding:9px;border-radius:8px;border:1px solid var(--line);background:transparent;
+    color:var(--text);font-size:12px;cursor:pointer;}
+  .preset-actions button.primary{background:var(--gold);color:#1A1304;border:none;font-weight:700;}
+
+  #signout-btn{background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;padding:0;}
+  .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--surface2);
+    border:1px solid var(--line);color:var(--text);padding:10px 18px;border-radius:20px;font-size:13px;
+    z-index:50;opacity:0;transition:opacity .25s;pointer-events:none;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===================== AUTH SCREEN ===================== -->
+  <div id="auth-screen">
+    <div class="brand-mark">STOCK WATCH · JP MARKET</div>
+    <div class="brand-title">銘柄観測台</div>
+    <div class="brand-sub">日本株 観測・保有 リアルタイム監視ツール</div>
+
+    <div class="field">
+      <label>メールアドレス</label>
+      <input id="auth-email" type="email" autocomplete="username" placeholder="you@example.com">
+    </div>
+    <div class="field">
+      <label>パスワード</label>
+      <input id="auth-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <button class="btn btn-primary" id="auth-submit">ログイン</button>
+    <button class="btn btn-ghost" id="auth-switch-btn" style="display:none;">新規登録に切り替え</button>
+    <div id="auth-msg"></div>
+    <div class="auth-toggle" id="auth-toggle-line">
+      アカウントをお持ちでない方は <a id="to-signup">新規登録</a>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN SCREEN ===================== -->
+  <div id="main-screen">
+    <header class="topbar">
+      <div>
+        <div class="brand-title">銘柄観測台</div>
+        <div class="brand-mark" style="margin-top:2px;">STOCK WATCH</div>
+      </div>
+      <button id="refresh-btn"><span class="ic">⟳</span><span>更新</span></button>
+    </header>
+    <div id="last-updated">最終更新：未実行</div>
+
+    <main>
+      <!-- ---------- Dashboard / 観測 ---------- -->
+      <div class="view active" id="view-watch">
+        <div class="section-title">銘柄を追加（観測リストへ） <span id="watch-add-hint" class="hint" style="margin:0;"></span></div>
+        <div class="add-row">
+          <input id="watch-symbol-input" placeholder="証券コード 例: 7203.T" class="mono">
+          <button id="watch-add-btn">追加</button>
+        </div>
+        <div class="hint">日本株は「コード.T」形式で入力（例: トヨタ = 7203.T）</div>
+
+        <div class="section-title">観測リスト <span class="count" id="watch-count">0</span></div>
+        <div id="watch-list"></div>
+      </div>
+
+      <!-- ---------- Holdings / 保有 ---------- -->
+      <div class="view" id="view-hold">
+        <div class="section-title">保有リスト <span class="count" id="hold-count">0</span></div>
+        <div id="hold-list"></div>
+      </div>
+
+      <!-- ---------- Settings / Presets ---------- -->
+      <div class="view" id="view-settings">
+        <div class="section-title">筛选套餐（フィルター設定）</div>
+        <div id="preset-list"></div>
+        <button class="btn btn-ghost" id="preset-new-btn">＋ 新しい套餐を作成</button>
+        <div class="section-title" style="margin-top:28px;">アカウント</div>
+        <div class="card">
+          <div style="font-size:13px;color:var(--muted);" id="account-email"></div>
+          <div style="margin-top:10px;"><button id="signout-btn">ログアウト</button></div>
+        </div>
+      </div>
+    </main>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-view="view-watch"><span class="ic">👁</span>観測</button>
+      <button class="tab-btn" data-view="view-hold"><span class="ic">💼</span>保有</button>
+      <button class="tab-btn" data-view="view-settings"><span class="ic">⚙</span>設定</button>
+    </nav>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   0. SUPABASE 配置 — 请替换为你自己 Supabase 项目的 URL 与 anon key
+   ===================================================================== */
+const SUPABASE_URL = 'https://qfjlocxarufklhbrvujo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmamxvY3hhcnVma2xoYnJ2dWpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5Njk0NTYsImV4cCI6MjA5ODU0NTQ1Nn0.xHM-u6aA_tqV_XXGpKyAfuN32uzo94jazJtaqaRvVNs';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+});
+
+/* =====================================================================
+   1. 状態
+   ===================================================================== */
+let session = null;
+let presets = [];
+let activePreset = null;
+let watchlist = [];   // [{id,symbol,name,...}]
+let holdings = [];    // [{id,symbol,name,entry_date,entry_signal_low,...}]
+const priceCache = {}; // symbol -> {candles, quote}
+
+/* =====================================================================
+   2. 工具函数
+   ===================================================================== */
+function $(sel){ return document.querySelector(sel); }
+function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function fmtPrice(v){ return v==null||isNaN(v) ? '—' : Number(v).toLocaleString('ja-JP',{maximumFractionDigits:1}); }
+function fmtPct(v){ return v==null||isNaN(v) ? '—' : (v>0?'+':'')+v.toFixed(2)+'%'; }
+
+/* =====================================================================
+   3. 技术指标引擎 (Indicator Engine)
+   closes/highs/lows/volumes: number[] (旧→新)
+   ===================================================================== */
+const Indicators = {
+  sma(arr, period){
+    const out = new Array(arr.length).fill(null);
+    let sum = 0;
+    for(let i=0;i<arr.length;i++){
+      sum += arr[i];
+      if(i>=period) sum -= arr[i-period];
+      if(i>=period-1) out[i] = sum/period;
+    }
+    return out;
+  },
+  ema(arr, period){
+    const out = new Array(arr.length).fill(null);
+    const k = 2/(period+1);
+    let prev = null;
+    for(let i=0;i<arr.length;i++){
+      if(arr[i]==null){ out[i]=prev; continue; }
+      prev = prev==null ? arr[i] : arr[i]*k + prev*(1-k);
+      out[i] = prev;
+    }
+    return out;
+  },
+  bollinger(closes, period=20, mult=2){
+    const mid = Indicators.sma(closes, period);
+    const upper = new Array(closes.length).fill(null);
+    const lower = new Array(closes.length).fill(null);
+    for(let i=period-1;i<closes.length;i++){
+      const slice = closes.slice(i-period+1,i+1);
+      const mean = mid[i];
+      const variance = slice.reduce((s,v)=>s+(v-mean)**2,0)/period;
+      const sd = Math.sqrt(variance);
+      upper[i] = mean + mult*sd;
+      lower[i] = mean - mult*sd;
+    }
+    return {mid, upper, lower};
+  },
+  rsi(closes, period=14){
+    const out = new Array(closes.length).fill(null);
+    let gainSum=0, lossSum=0;
+    for(let i=1;i<closes.length;i++){
+      const diff = closes[i]-closes[i-1];
+      const gain = diff>0?diff:0, loss = diff<0?-diff:0;
+      if(i<=period){
+        gainSum+=gain; lossSum+=loss;
+        if(i===period){
+          const rs = lossSum===0?100:gainSum/lossSum;
+          out[i] = 100-(100/(1+rs));
+        }
+      } else {
+        gainSum = (gainSum*(period-1)+gain)/period;
+        lossSum = (lossSum*(period-1)+loss)/period;
+        const rs = lossSum===0?100:gainSum/lossSum;
+        out[i] = 100-(100/(1+rs));
+      }
+    }
+    return out;
+  },
+  macd(closes, fast=12, slow=26, signal=9){
+    const emaFast = Indicators.ema(closes, fast);
+    const emaSlow = Indicators.ema(closes, slow);
+    const macdLine = closes.map((_,i)=> (emaFast[i]!=null&&emaSlow[i]!=null) ? emaFast[i]-emaSlow[i] : null);
+    const signalLine = Indicators.ema(macdLine.map(v=>v==null?0:v), signal);
+    const hist = macdLine.map((v,i)=> (v!=null&&signalLine[i]!=null) ? v-signalLine[i] : null);
+    return {macdLine, signalLine, hist};
+  },
+  atr(highs, lows, closes, period=14){
+    const tr = highs.map((h,i)=>{
+      if(i===0) return h-lows[i];
+      return Math.max(h-lows[i], Math.abs(h-closes[i-1]), Math.abs(lows[i]-closes[i-1]));
+    });
+    return Indicators.sma(tr, period);
+  },
+  bias(closes, period=25){
+    const ma = Indicators.sma(closes, period);
+    return closes.map((c,i)=> ma[i]==null?null:((c-ma[i])/ma[i])*100);
+  },
+  volumeRatio(volumes, period=20){
+    const avg = Indicators.sma(volumes, period);
+    return volumes.map((v,i)=> avg[i]==null||avg[i]===0?null:v/avg[i]);
+  }
+};
+
+/* =====================================================================
+   4. 数据获取 — Yahoo Finance（经 CORS 代理）
+   ===================================================================== */
+async function fetchCandles(symbol){
+  const proxies = [
+    `https://corsproxy.io/?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/'+symbol+'?range=6mo&interval=1d')}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/'+symbol+'?range=6mo&interval=1d')}`
+  ];
+  let lastErr;
+  for(const url of proxies){
+    try{
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const json = await res.json();
+      const result = json.chart?.result?.[0];
+      if(!result) throw new Error('no data');
+      const ts = result.timestamp;
+      const q = result.indicators.quote[0];
+      const candles = ts.map((t,i)=>({
+        t, open:q.open[i], high:q.high[i], low:q.low[i], close:q.close[i], volume:q.volume[i]
+      })).filter(c=>c.close!=null);
+      const meta = result.meta;
+      return { candles, name: meta.longName || meta.shortName || symbol, currency: meta.currency };
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('データ取得に失敗しました');
+}
+
+async function refreshSymbol(symbol){
+  try{
+    const data = await fetchCandles(symbol);
+    priceCache[symbol] = data;
+    return data;
+  }catch(e){
+    console.error('fetch fail', symbol, e);
+    return null;
+  }
+}
+
+/* =====================================================================
+   5. 信号引擎 (Signal Engine)
+   ===================================================================== */
+function computeSignals(symbol, cfg){
+  const data = priceCache[symbol];
+  if(!data || data.candles.length < 30) return null;
+  const c = data.candles;
+  const closes = c.map(x=>x.close), highs = c.map(x=>x.high), lows = c.map(x=>x.low), vols = c.map(x=>x.volume);
+  const n = closes.length;
+
+  const bb = Indicators.bollinger(closes, 20, 2);
+  const biasArr = Indicators.bias(closes, cfg.biasMa || 25);
+  const volRatioArr = Indicators.volumeRatio(vols, 20);
+  const maDefenseArr = Indicators.sma(closes, cfg.defenseMa || 25);
+
+  const last = n-1;
+  const lastClose = closes[last];
+  const prevClose = closes[last-1];
+  const changePct = ((lastClose - prevClose)/prevClose)*100;
+
+  // 近期阻力位：过去20日（不含今日）最高价
+  const resistance = Math.max(...highs.slice(Math.max(0,last-20), last));
+  const isBigBull = (lastClose - c[last].open) > 0 && (lastClose - c[last].open)/c[last].open > 0.02; // 涨幅>2%视为大阳线
+  const breakout = lastClose > resistance || (bb.upper[last]!=null && lastClose > bb.upper[last]);
+  const volMult = volRatioArr[last];
+  const volOk = volMult!=null && volMult >= (cfg.volumeMultiplier || 1.5);
+
+  const buySignal = isBigBull && breakout && volOk;
+
+  return {
+    lastClose, changePct,
+    bias: biasArr[last],
+    volRatio: volMult,
+    maDefense: maDefenseArr[last],
+    bbUpper: bb.upper[last],
+    resistance,
+    candleLow: lows[last],
+    buySignal,
+    asOf: c[last].t
+  };
+}
+
+function watchSignalLabel(sig){
+  if(!sig) return {cls:'watch', text:'⏳ データ取得中／不足'};
+  if(sig.buySignal) return {cls:'buy', text:'🟢 絶好の買場（放量突破）'};
+  return {cls:'watch', text:'⚪ 観測継続'};
+}
+
+function holdSignal(holding){
+  const sig = computeSignals(holding.symbol, currentConfig());
+  if(!sig) return {cls:'watch', text:'⏳ データ取得中／不足', stop:null, profit:null};
+  const stopPrice = holding.entry_signal_low * (1 - (holding.stop_loss_pct||0.01));
+  const profitPrice = sig.maDefense;
+  if(sig.lastClose < stopPrice){
+    return {cls:'stoploss', text:'🔴 損切り推奨', stop:stopPrice, profit:profitPrice, last:sig.lastClose, changePct:sig.changePct};
+  }
+  if(profitPrice!=null && sig.lastClose < profitPrice){
+    return {cls:'takeprofit', text:'🔵 利益確定検討', stop:stopPrice, profit:profitPrice, last:sig.lastClose, changePct:sig.changePct};
+  }
+  return {cls:'hold', text:'🟢 保有継続', stop:stopPrice, profit:profitPrice, last:sig.lastClose, changePct:sig.changePct};
+}
+
+/* =====================================================================
+   6. 默认套餐参数
+   ===================================================================== */
+function defaultConfig(){
+  return { biasMa:25, biasMin:-5, biasMax:5, volumeMultiplier:1.5, defenseMa:25, bbPeriod:20, bbMult:2 };
+}
+function currentConfig(){
+  return activePreset ? activePreset.config : defaultConfig();
+}
+
+/* =====================================================================
+   7. Supabase 数据读写
+   ===================================================================== */
+async function loadAllData(){
+  const uid = session.user.id;
+  const [{data:p}, {data:w}, {data:h}] = await Promise.all([
+    sb.from('presets').select('*').eq('user_id', uid).order('created_at'),
+    sb.from('watchlist').select('*').eq('user_id', uid).order('added_at'),
+    sb.from('holdings').select('*').eq('user_id', uid).order('added_at')
+  ]);
+  presets = p || [];
+  watchlist = w || [];
+  holdings = h || [];
+  activePreset = presets.find(x=>x.is_active) || presets[0] || null;
+  if(presets.length===0){
+    await createPreset('デフォルト套餐', defaultConfig(), true);
+  }
+}
+
+async function createPreset(name, config, makeActive){
+  const uid = session.user.id;
+  const { data, error } = await sb.from('presets').insert({ user_id:uid, name, config, is_active: !!makeActive }).select().single();
+  if(error){ toast('套餐作成失敗: '+error.message); return null; }
+  presets.push(data);
+  if(makeActive) activePreset = data;
+  return data;
+}
+
+async function updatePreset(id, fields){
+  const { data, error } = await sb.from('presets').update(fields).eq('id', id).select().single();
+  if(error){ toast('更新失敗: '+error.message); return; }
+  const idx = presets.findIndex(p=>p.id===id);
+  presets[idx] = data;
+  if(activePreset && activePreset.id===id) activePreset = data;
+}
+
+async function setActivePreset(id){
+  const uid = session.user.id;
+  await sb.from('presets').update({is_active:false}).eq('user_id', uid);
+  await sb.from('presets').update({is_active:true}).eq('id', id);
+  presets = presets.map(p=>({...p, is_active: p.id===id}));
+  activePreset = presets.find(p=>p.id===id);
+  renderSettings();
+}
+
+async function addToWatchlist(symbol, name){
+  const uid = session.user.id;
+  const { data, error } = await sb.from('watchlist')
+    .upsert({ user_id:uid, symbol, name, preset_id: activePreset?.id || null }, {onConflict:'user_id,symbol'})
+    .select().single();
+  if(error){ toast('追加失敗: '+error.message); return; }
+  watchlist = watchlist.filter(w=>w.symbol!==symbol);
+  watchlist.push(data);
+}
+
+async function removeFromWatchlist(id){
+  await sb.from('watchlist').delete().eq('id', id);
+  watchlist = watchlist.filter(w=>w.id!==id);
+  renderWatch();
+}
+
+async function promoteToHoldings(item){
+  const data = priceCache[item.symbol];
+  if(!data){ toast('先に更新してください'); return; }
+  const c = data.candles[data.candles.length-1];
+  const uid = session.user.id;
+  const { data:row, error } = await sb.from('holdings').upsert({
+    user_id:uid, symbol:item.symbol, name:item.name,
+    entry_date: new Date(c.t*1000).toISOString().slice(0,10),
+    entry_signal_low: c.low,
+    stop_loss_pct: 0.01,
+    defense_ma_period: currentConfig().defenseMa || 25
+  }, {onConflict:'user_id,symbol'}).select().single();
+  if(error){ toast('移動失敗: '+error.message); return; }
+  holdings = holdings.filter(h=>h.symbol!==item.symbol);
+  holdings.push(row);
+  await removeFromWatchlist(item.id);
+  toast(item.symbol+' を保有リストへ移動しました');
+  renderHold();
+}
+
+async function removeFromHoldings(id){
+  await sb.from('holdings').delete().eq('id', id);
+  holdings = holdings.filter(h=>h.id!==id);
+  renderHold();
+}
+
+/* =====================================================================
+   8. レンダリング
+   ===================================================================== */
+function renderWatch(){
+  $('#watch-count').textContent = watchlist.length;
+  const el = $('#watch-list');
+  if(watchlist.length===0){
+    el.innerHTML = `<div class="empty"><span class="ic">👁</span>観測リストは空です<div class="sub">上の入力欄から証券コードを追加してください</div></div>`;
+    return;
+  }
+  el.innerHTML = watchlist.map(item=>{
+    const sig = computeSignals(item.symbol, currentConfig());
+    const label = watchSignalLabel(sig);
+    const data = priceCache[item.symbol];
+    const name = data?.name || item.name || item.symbol;
+    return `
+    <div class="card">
+      <div class="card-top">
+        <div><div class="stk-code">${item.symbol}</div><div class="stk-name">${name}</div></div>
+        <div class="stk-price">${sig?fmtPrice(sig.lastClose):'—'}
+          <span class="chg ${sig&&sig.changePct>=0?'up':'down'}">${sig?fmtPct(sig.changePct):''}</span>
+        </div>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">乖離率(${currentConfig().biasMa||25}MA)</div><div class="v">${sig?fmtPct(sig.bias):'—'}</div></div>
+        <div class="metric"><div class="k">出来高倍率</div><div class="v">${sig&&sig.volRatio!=null?sig.volRatio.toFixed(2)+'x':'—'}</div></div>
+        <div class="metric"><div class="k">直近抵抗線</div><div class="v">${sig?fmtPrice(sig.resistance):'—'}</div></div>
+      </div>
+      <div class="signal ${label.cls}">${label.text}</div>
+      <div class="card-actions">
+        <button class="promote" onclick="window.__promote('${item.id}')">保有リストへ移動</button>
+        <button class="danger" onclick="window.__removeWatch('${item.id}')">削除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderHold(){
+  $('#hold-count').textContent = holdings.length;
+  const el = $('#hold-list');
+  if(holdings.length===0){
+    el.innerHTML = `<div class="empty"><span class="ic">💼</span>保有リストは空です<div class="sub">観測リストから「保有リストへ移動」してください</div></div>`;
+    return;
+  }
+  el.innerHTML = holdings.map(h=>{
+    const s = holdSignal(h);
+    const data = priceCache[h.symbol];
+    const name = data?.name || h.name || h.symbol;
+    return `
+    <div class="card">
+      <div class="card-top">
+        <div><div class="stk-code">${h.symbol}</div><div class="stk-name">${name}</div></div>
+        <div class="stk-price">${s.last?fmtPrice(s.last):'—'}
+          <span class="chg ${s.changePct>=0?'up':'down'}">${s.changePct!=null?fmtPct(s.changePct):''}</span>
+        </div>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">🔴 損切り価格</div><div class="v">${s.stop?fmtPrice(s.stop)+'円':'—'}</div></div>
+        <div class="metric"><div class="k">🔵 利確防衛線</div><div class="v">${s.profit?fmtPrice(s.profit)+'円':'—'}</div></div>
+      </div>
+      <div class="signal ${s.cls}">${s.text}</div>
+      <div class="card-actions">
+        <button class="danger" onclick="window.__removeHold('${h.id}')">クローズ（削除）</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSettings(){
+  $('#account-email').textContent = session?.user?.email || '';
+  const el = $('#preset-list');
+  el.innerHTML = presets.map(p=>{
+    const cfg = p.config || {};
+    return `
+    <div class="preset-card ${p.is_active?'active':''}">
+      <div class="preset-head">
+        <div class="name">${p.name}</div>
+        ${p.is_active ? '<span class="badge">使用中</span>' : `<button class="card-actions" style="all:unset;cursor:pointer;color:var(--gold);font-size:12px;" onclick="window.__activatePreset('${p.id}')">適用する</button>`}
+      </div>
+      <div class="param-grid">
+        <div class="param"><label>乖離率 MA 周期</label><input type="number" value="${cfg.biasMa??25}" onchange="window.__updateCfg('${p.id}','biasMa',this.value)"></div>
+        <div class="param"><label>出来高倍率 (N倍)</label><input type="number" step="0.1" value="${cfg.volumeMultiplier??1.5}" onchange="window.__updateCfg('${p.id}','volumeMultiplier',this.value)"></div>
+        <div class="param"><label>乖離率 下限%</label><input type="number" value="${cfg.biasMin??-5}" onchange="window.__updateCfg('${p.id}','biasMin',this.value)"></div>
+        <div class="param"><label>乖離率 上限%</label><input type="number" value="${cfg.biasMax??5}" onchange="window.__updateCfg('${p.id}','biasMax',this.value)"></div>
+        <div class="param"><label>ボリンジャー期間</label><input type="number" value="${cfg.bbPeriod??20}" onchange="window.__updateCfg('${p.id}','bbPeriod',this.value)"></div>
+        <div class="param"><label>利確防衛 MA</label><input type="number" value="${cfg.defenseMa??25}" onchange="window.__updateCfg('${p.id}','defenseMa',this.value)"></div>
+      </div>
+      <div class="preset-actions">
+        <button onclick="window.__renamePreset('${p.id}')">名前変更</button>
+        <button class="danger" onclick="window.__deletePreset('${p.id}')" style="color:var(--sell);">削除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAll(){ renderWatch(); renderHold(); renderSettings(); }
+
+/* =====================================================================
+   9. アクション（グローバル公開）
+   ===================================================================== */
+window.__promote = (id)=>{ const item = watchlist.find(w=>w.id===id); if(item) promoteToHoldings(item); };
+window.__removeWatch = (id)=> removeFromWatchlist(id);
+window.__removeHold = (id)=>{ if(confirm('保有リストから削除しますか？')) removeFromHoldings(id); };
+window.__activatePreset = (id)=> setActivePreset(id);
+window.__updateCfg = async (id, key, val)=>{
+  const p = presets.find(x=>x.id===id);
+  const cfg = {...p.config, [key]: Number(val)};
+  await updatePreset(id, {config:cfg});
+  renderAll();
+};
+window.__renamePreset = async (id)=>{
+  const p = presets.find(x=>x.id===id);
+  const name = prompt('新しい套餐名:', p.name);
+  if(name) { await updatePreset(id, {name}); renderSettings(); }
+};
+window.__deletePreset = async (id)=>{
+  if(presets.length<=1){ toast('最後の套餐は削除できません'); return; }
+  if(!confirm('この套餐を削除しますか？')) return;
+  await sb.from('presets').delete().eq('id', id);
+  presets = presets.filter(p=>p.id!==id);
+  if(activePreset?.id===id){ activePreset = presets[0]; await setActivePreset(activePreset.id); }
+  renderSettings();
+};
+
+/* =====================================================================
+   10. 全データ更新（手動リフレッシュボタン）
+   ===================================================================== */
+async function refreshAll(){
+  const btn = $('#refresh-btn');
+  btn.classList.add('spin');
+  const symbols = [...new Set([...watchlist.map(w=>w.symbol), ...holdings.map(h=>h.symbol)])];
+  await Promise.all(symbols.map(refreshSymbol));
+  btn.classList.remove('spin');
+  $('#last-updated').textContent = '最終更新：' + new Date().toLocaleString('ja-JP');
+  renderAll();
+}
+
+/* =====================================================================
+   11. UI 配線
+   ===================================================================== */
+function wireTabs(){
+  $all('.tab-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      $all('.tab-btn').forEach(b=>b.classList.remove('active'));
+      $all('.view').forEach(v=>v.classList.remove('active'));
+      btn.classList.add('active');
+      $('#'+btn.dataset.view).classList.add('active');
+    });
+  });
+}
+
+function wireWatchAdd(){
+  $('#watch-add-btn').addEventListener('click', async ()=>{
+    let symbol = $('#watch-symbol-input').value.trim().toUpperCase();
+    if(!symbol) return;
+    if(!symbol.includes('.')) symbol += '.T';
+    $('#watch-symbol-input').value='';
+    toast(symbol+' を取得中…');
+    const data = await refreshSymbol(symbol);
+    if(!data){ toast('データ取得に失敗しました: '+symbol); return; }
+    await addToWatchlist(symbol, data.name);
+    renderWatch();
+    toast(symbol+' を観測リストに追加しました');
+  });
+}
+
+function wirePresetNew(){
+  $('#preset-new-btn').addEventListener('click', async ()=>{
+    const name = prompt('套餐名を入力してください', '新しい套餐');
+    if(!name) return;
+    await createPreset(name, defaultConfig(), false);
+    renderSettings();
+  });
+}
+
+function wireRefresh(){ $('#refresh-btn').addEventListener('click', refreshAll); }
+function wireSignout(){ $('#signout-btn').addEventListener('click', async ()=>{ await sb.auth.signOut(); location.reload(); }); }
+
+/* =====================================================================
+   12. 認証フロー
+   ===================================================================== */
+let mode = 'login'; // or 'signup'
+function wireAuth(){
+  $('#to-signup').addEventListener('click', ()=>{
+    mode = 'signup';
+    $('#auth-submit').textContent = '新規登録';
+    $('#auth-switch-btn').style.display='block';
+    $('#auth-switch-btn').textContent = 'ログインに切り替え';
+    $('#auth-toggle-line').style.display = 'none';
+    $('#auth-msg').textContent='';
+  });
+  $('#auth-switch-btn').addEventListener('click', ()=>{
+    mode = 'login';
+    $('#auth-submit').textContent = 'ログイン';
+    $('#auth-switch-btn').style.display='none';
+    $('#auth-toggle-line').style.display='block';
+    $('#auth-msg').textContent='';
+  });
+  $('#auth-submit').addEventListener('click', async ()=>{
+    const email = $('#auth-email').value.trim();
+    const password = $('#auth-pass').value;
+    const msg = $('#auth-msg');
+    msg.className=''; msg.textContent='処理中…';
+    if(!email || !password){ msg.className='err'; msg.textContent='メールとパスワードを入力してください'; return; }
+    try{
+      if(mode==='login'){
+        const {data, error} = await sb.auth.signInWithPassword({email, password});
+        if(error) throw error;
+        session = data.session;
+        await enterApp();
+      } else {
+        const {data, error} = await sb.auth.signUp({email, password});
+        if(error) throw error;
+        if(data.session){ session = data.session; await enterApp(); }
+        else { msg.className='ok'; msg.textContent='確認メールを送信しました。メール確認後にログインしてください。'; }
+      }
+    }catch(e){
+      msg.className='err'; msg.textContent = e.message || '認証エラーが発生しました';
+    }
+  });
+}
+
+async function enterApp(){
+  $('#auth-screen').style.display='none';
+  $('#main-screen').style.display='flex';
+  await loadAllData();
+  renderAll();
+  refreshAll();
+}
+
+async function init(){
+  wireTabs(); wireWatchAdd(); wirePresetNew(); wireRefresh(); wireSignout(); wireAuth();
+
+  const { data } = await sb.auth.getSession();
+  if(data.session){
+    session = data.session;
+    await enterApp();
+  }
+  sb.auth.onAuthStateChange((event, sess)=>{
+    if(event==='SIGNED_OUT'){ location.reload(); }
+  });
+}
+init();
+</script>
+</body>
+</html>
