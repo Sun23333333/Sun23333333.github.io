@@ -95,6 +95,10 @@
   .signal.stoploss{background:rgba(240,89,74,.14);color:var(--sell);}
   .signal.takeprofit{background:rgba(76,139,245,.14);color:var(--hold);}
   .signal.hold{background:rgba(46,189,133,.10);color:var(--buy);}
+  .cost-row{display:flex;gap:8px;margin-top:10px;}
+  .cost-row .param label{font-size:10px;color:var(--muted);}
+  .cost-row .param input{width:100%;padding:8px 10px;background:var(--surface2);border:1px solid var(--line);
+    border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;}
   .card-actions{display:flex;gap:8px;margin-top:12px;}
   .card-actions button{flex:1;padding:9px;border-radius:8px;border:1px solid var(--line);background:transparent;
     color:var(--text);font-size:12px;cursor:pointer;}
@@ -202,12 +206,35 @@
           <div style="margin-top:10px;"><button id="signout-btn">ログアウト</button></div>
         </div>
       </div>
+      <!-- ---------- AI Assistant ---------- -->
+      <div class="view" id="view-ai">
+        <div class="section-title">AI アシスタント</div>
+        <div class="card">
+          <div style="font-size:13px;line-height:1.7;color:var(--text);">
+            この機能はまだ準備中です。理由：AIチャットを安全に動かすには、APIキーをブラウザに直接置くことができないため（誰でも盗用できてしまいます）、<b>Supabase Edge Function</b> を使ってサーバー側でキーを管理する必要があります。
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:12px;line-height:1.6;">
+            設定手順の概要：<br>
+            1. Supabase ダッシュボード → Edge Functions で新規関数を作成<br>
+            2. Anthropic API キーを Supabase の環境変数（Secrets）に登録<br>
+            3. Edge Function 経由でチャットAPIを呼び出す<br><br>
+            この部分の実装が必要でしたら教えてください。次のステップとして一緒に進めます。
+          </div>
+        </div>
+        <div class="chat-box card" style="opacity:.5;pointer-events:none;">
+          <div class="add-row">
+            <input placeholder="準備中…（Edge Function 未接続）" disabled>
+            <button disabled>送信</button>
+          </div>
+        </div>
+      </div>
     </main>
 
     <nav class="tabs">
       <button class="tab-btn active" data-view="view-watch"><span class="ic">👁</span>観測</button>
       <button class="tab-btn" data-view="view-hold"><span class="ic">💼</span>保有</button>
       <button class="tab-btn" data-view="view-settings"><span class="ic">⚙</span>設定</button>
+      <button class="tab-btn" data-view="view-ai"><span class="ic">🤖</span>AI</button>
     </nav>
   </div>
 </div>
@@ -353,10 +380,32 @@ async function fetchCandles(symbol){
         t, open:q.open[i], high:q.high[i], low:q.low[i], close:q.close[i], volume:q.volume[i]
       })).filter(c=>c.close!=null);
       const meta = result.meta;
-      return { candles, name: meta.longName || meta.shortName || symbol, currency: meta.currency };
+      const divInfo = await fetchDividendInfo(symbol).catch(()=>({}));
+      return { candles, name: meta.longName || meta.shortName || symbol, currency: meta.currency, ...divInfo };
     }catch(e){ lastErr = e; }
   }
   throw lastErr || new Error('データ取得に失敗しました');
+}
+
+async function fetchDividendInfo(symbol){
+  const target = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail`;
+  const proxies = [
+    `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`
+  ];
+  for(const url of proxies){
+    try{
+      const res = await fetch(url);
+      if(!res.ok) continue;
+      const json = await res.json();
+      const sd = json.quoteSummary?.result?.[0]?.summaryDetail;
+      if(!sd) continue;
+      const dividendYield = sd.dividendYield?.raw!=null ? sd.dividendYield.raw*100 : null;
+      const exDate = sd.exDividendDate?.raw ? new Date(sd.exDividendDate.raw*1000).toISOString().slice(0,10) : null;
+      return { dividendYield, exDividendDate: exDate };
+    }catch(e){}
+  }
+  return {};
 }
 
 async function refreshSymbol(symbol){
@@ -529,6 +578,15 @@ async function removeFromHoldings(id){
   renderHold();
 }
 
+async function updateHolding(id, field, value){
+  const num = value === '' ? null : Number(value);
+  const { data, error } = await sb.from('holdings').update({[field]: num}).eq('id', id).select().single();
+  if(error){ toast('更新失敗: '+error.message); return; }
+  const idx = holdings.findIndex(h=>h.id===id);
+  holdings[idx] = data;
+  renderHold();
+}
+
 /* =====================================================================
    8. レンダリング
    ===================================================================== */
@@ -588,13 +646,32 @@ function renderHold(){
       <div class="metrics">
         <div class="metric"><div class="k">🔴 損切り価格</div><div class="v">${s.stop?fmtPrice(s.stop)+'円':'—'}</div></div>
         <div class="metric"><div class="k">🔵 利確防衛線</div><div class="v">${s.profit?fmtPrice(s.profit)+'円':'—'}</div></div>
+        ${h.cost_price ? `<div class="metric"><div class="k">損益</div><div class="v" style="color:${pnl(h,s).cls}">${pnl(h,s).text}</div></div>` : ''}
+        ${data?.dividendYield!=null ? `<div class="metric"><div class="k">配当利回り</div><div class="v">${data.dividendYield.toFixed(2)}%</div></div>` : ''}
+        ${data?.exDividendDate ? `<div class="metric"><div class="k">権利落ち日</div><div class="v">${data.exDividendDate}</div></div>` : ''}
       </div>
       <div class="signal ${s.cls}">${s.text}</div>
+      <div class="cost-row">
+        <div class="param" style="flex:1;"><label>買値(円)</label><input type="number" value="${h.cost_price??''}" placeholder="買値" onchange="window.__updateHold('${h.id}','cost_price',this.value)"></div>
+        <div class="param" style="flex:1;"><label>株数</label><input type="number" value="${h.shares??''}" placeholder="株数" onchange="window.__updateHold('${h.id}','shares',this.value)"></div>
+      </div>
       <div class="card-actions">
         <button class="danger" onclick="window.__removeHold('${h.id}')">クローズ（削除）</button>
       </div>
     </div>`;
   }).join('');
+}
+
+function pnl(h, s){
+  if(!h.cost_price || !s.last) return {text:'—', cls:'var(--muted)'};
+  const diffPerShare = s.last - h.cost_price;
+  const pct = (diffPerShare / h.cost_price) * 100;
+  const totalYen = h.shares ? diffPerShare * h.shares : null;
+  const cls = diffPerShare >= 0 ? 'var(--buy)' : 'var(--sell)';
+  const text = totalYen!=null
+    ? `${totalYen>=0?'+':''}${Math.round(totalYen).toLocaleString('ja-JP')}円 (${pct>=0?'+':''}${pct.toFixed(1)}%)`
+    : `${pct>=0?'+':''}${pct.toFixed(1)}%`;
+  return {text, cls};
 }
 
 function renderSettings(){
@@ -615,7 +692,10 @@ function renderSettings(){
         <div class="param"><label>乖離率 上限%</label><input type="number" value="${cfg.biasMax??5}" onchange="window.__updateCfg('${p.id}','biasMax',this.value)"></div>
         <div class="param"><label>ボリンジャー期間</label><input type="number" value="${cfg.bbPeriod??20}" onchange="window.__updateCfg('${p.id}','bbPeriod',this.value)"></div>
         <div class="param"><label>利確防衛 MA</label><input type="number" value="${cfg.defenseMa??25}" onchange="window.__updateCfg('${p.id}','defenseMa',this.value)"></div>
+        <div class="param"><label>時価総額下限(億円)</label><input type="number" value="${cfg.marketCapMin??0}" onchange="window.__updateCfg('${p.id}','marketCapMin',this.value)"></div>
+        <div class="param"><label>PER上限</label><input type="number" value="${cfg.perMax??''}" onchange="window.__updateCfg('${p.id}','perMax',this.value)"></div>
       </div>
+      <div class="hint" style="margin:10px 4px 0;">※ 東証全銘柄の自動スキャンは現状未対応です。上記条件は将来の絞り込み機能のために保存されます。</div>
       <div class="preset-actions">
         <button onclick="window.__renamePreset('${p.id}')">名前変更</button>
         <button class="danger" onclick="window.__deletePreset('${p.id}')" style="color:var(--sell);">削除</button>
@@ -632,6 +712,7 @@ function renderAll(){ renderWatch(); renderHold(); renderSettings(); }
 window.__promote = (id)=>{ const item = watchlist.find(w=>w.id===id); if(item) promoteToHoldings(item); };
 window.__removeWatch = (id)=> removeFromWatchlist(id);
 window.__removeHold = (id)=>{ if(confirm('保有リストから削除しますか？')) removeFromHoldings(id); };
+window.__updateHold = (id, field, value)=> updateHolding(id, field, value);
 window.__activatePreset = (id)=> setActivePreset(id);
 window.__updateCfg = async (id, key, val)=>{
   const p = presets.find(x=>x.id===id);
